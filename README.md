@@ -1,4 +1,6 @@
-# Vaadin Dev Loop – Spring Boot based Example
+# Vaadin Dev Loop – Spring Initializr based Example
+
+This project has been created using [Spring Initializr](https://start.spring.io/).
 
 The Vaadin **Dev Loop** shortens the cycle needed to make code changes live, visible in the running app, or verified by tests. A daemon owns the application process and hot-swaps, pushes CSS, or restarts only when necessary — no full rebuild or app restart per edit.
 
