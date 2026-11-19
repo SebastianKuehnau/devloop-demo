@@ -93,18 +93,33 @@ if a restart was needed.
 
 ## Example result
 
-Output from a run with Claude Code (Vaadin 25.3.5, Spring Boot 4.1.2):
+Output from a run with Claude Code (Claude Opus 5.5, Vaadin 25.3.5, Spring Boot 4.1.2), each step sent as its own headless turn (`claude -p --resume`) in one session, so tokens can be attributed per step:
 
 | Step | Path | Exit code | Duration | Without Dev Loop (approx.) | Reason for restart |
 |---|---|---|---|---|---|
-| 1. New view | Hotswap | 0 | 0.69 s | ~5 s (compile + restart) | – (new route: page reload needed to show it) |
-| 2. CSS color | HMR | 0 | 0.07 s | ~1.5 s (copy resources + manual reload) | – |
-| 3. Text + placeholder | Hotswap | 0 | 0.63 s | ~5 s (compile + restart) | – |
-| 4. Button field + notification | Hotswap | 0 | 0.66 s | ~5 s (compile + restart) | – |
-| 5. `GreetingService` + injection | Restart (automatic) | 0 | 5.19 s | ~5 s (compile + restart) | New Spring bean — component scanning only runs at startup |
-| 6a. Compile error | Error | 1 | 0.08 s | ~1.5 s (failed `mvn compile`) | – (`';' expected`; app keeps last good bytes) |
-| 6b. Fix | Hotswap | 0 | 0.64 s | ~5 s (compile + restart) | – |
+| 1. New view | Hotswap | 0 | 0.87 s | ~5 s (compile + restart) | – (new route: page reload needed to show it) |
+| 2. CSS color | HMR | 0 | 0.01 s | ~1.5 s (copy resources + manual reload) | – |
+| 3. Text + placeholder | Hotswap | 0 | 0.61 s | ~5 s (compile + restart) | – |
+| 4. Button field + notification | Hotswap | 0 | 0.62 s | ~5 s (compile + restart) | – |
+| 5. `GreetingService` + injection | Restart (automatic) | 0 | 3.25 s | ~5 s (compile + restart) | New Spring bean — component scanning only runs at startup |
+| 6a. Compile error | Error | 1 | – (not printed on failure) | ~1.5 s (failed `mvn compile`) | – (`';' expected`; app keeps last good bytes) |
+| 6b. Fix | Hotswap | 0 | 0.61 s | ~5 s (compile + restart) | – |
 
 "Without Dev Loop" assumes the classic cycle per edit: stop the app, `./mvnw compile`, `./mvnw spring-boot:run`, reload the browser. Basis: measured on the same machine with this (still nearly empty) project — incremental `./mvnw -o compile` 1.3–2.5 s, `spring-boot:run` until `Started Application` 3.7 s. Not included: stopping the old process, waiting for/parsing the startup log, and lost UI state after a restart. In real applications with more beans, JPA etc., startup takes considerably longer, so the gap grows.
 
-Steps 2–4 went live in the open page without a reload. Only adding a new Spring bean triggered a restart, which the daemon performed by itself.
+### Token usage per step
+
+| Step | Agent time | Turns | Output tokens | Input tokens | of which from cache | Cost (API list price) |
+|---|---|---|---|---|---|---|
+| 1. New view | 34.5 s | 16 | 2,443 | 611,184 | 570,620 | $0.49 |
+| 2. CSS color | 19.5 s | 11 | 1,461 | 334,568 | 331,338 | $0.12 |
+| 3. Text + placeholder | 16.5 s | 10 | 1,483 | 235,787 | 232,858 | $0.10 |
+| 4. Button field + notification | 33.8 s | 15 | 2,238 | 380,029 | 375,094 | $0.16 |
+| 5. `GreetingService` + injection | 22.7 s | 13 | 1,937 | 269,637 | 265,317 | $0.13 |
+| 6a. Compile error | 14.6 s | 7 | 1,049 | 212,411 | 210,232 | $0.08 |
+| 6b. Fix | 15.7 s | 9 | 1,412 | 218,995 | 216,521 | $0.09 |
+| **Total** | **157.3 s** | **81** | **12,023** | **2,262,611** | **2,201,980** | **$1.17** |
+
+Input tokens count the full context again on every model call (turn); ~97 % of them are cache reads, which are billed at a fraction of the normal input price. Step 1 includes the initial context (system prompt, loading the Dev Loop skill, reading the project). Agent time is the agent's total wall time for the step (reading, editing, `apply`, browser check), not just the Dev Loop duration. Exit codes 0 are as reported by the agent; it could not print `$?` under its permission settings.
+
+The Playwright page did not survive between the headless turns, so the CSS push (step 2) and the hotswap in step 3 were verified after a fresh page load; in step 4 the button appeared in the already-open page without a reload. Only adding a new Spring bean triggered a restart, which the daemon performed by itself.
