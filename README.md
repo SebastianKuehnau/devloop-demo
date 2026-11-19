@@ -95,19 +95,19 @@ if a restart was needed.
 
 Output from a run with Claude Code (Claude Opus 5.5, Vaadin 25.3.5, Spring Boot 4.1.2), each step sent as its own headless turn (`claude -p --resume`) in one session, so tokens can be attributed per step:
 
-| Step | Path | Exit code | Duration | Without Dev Loop (approx.) | Reason for restart |
+| Step | Path | Exit code | Duration | Without Dev Loop (measured) | Reason for restart |
 |---|---|---|---|---|---|
-| 1. New view | Hotswap | 0 | 0.87 s | ~5 s (compile + restart) | – (new route: page reload needed to show it) |
-| 2. CSS color | HMR | 0 | 0.01 s | ~1.5 s (copy resources + manual reload) | – |
-| 3. Text + placeholder | Hotswap | 0 | 0.61 s | ~5 s (compile + restart) | – |
-| 4. Button field + notification | Hotswap | 0 | 0.62 s | ~5 s (compile + restart) | – |
-| 5. `GreetingService` + injection | Restart (automatic) | 0 | 3.25 s | ~5 s (compile + restart) | New Spring bean — component scanning only runs at startup |
-| 6a. Compile error | Error | 1 | – (not printed on failure) | ~1.5 s (failed `mvn compile`) | – (`';' expected`; app keeps last good bytes) |
-| 6b. Fix | Hotswap | 0 | 0.61 s | ~5 s (compile + restart) | – |
+| 1. New view | Hotswap | 0 | 0.87 s | ~6 s (compile + DevTools restart) | – (new route: page reload needed to show it) |
+| 2. CSS color | HMR | 0 | 0.01 s | ~5 s (compile + manual reload) | – |
+| 3. Text + placeholder | Hotswap | 0 | 0.61 s | ~5.7 s (compile + DevTools restart) | – |
+| 4. Button field + notification | Hotswap | 0 | 0.62 s | ~5.5 s (compile + DevTools restart) | – |
+| 5. `GreetingService` + injection | Restart (automatic) | 0 | 3.25 s | ~5.8 s (compile + DevTools restart) | New Spring bean — component scanning only runs at startup |
+| 6a. Compile error | Error | 1 | – (not printed on failure) | 1.3 s compile failure + unwanted DevTools restart (see below) | – (`';' expected`; app keeps last good bytes) |
+| 6b. Fix | Hotswap | 0 | 0.61 s | ~5.8 s (compile + DevTools restart) | – |
 
-"Without Dev Loop" assumes the classic cycle per edit: stop the app, `./mvnw compile`, `./mvnw spring-boot:run`, reload the browser. Basis: measured on the same machine with this (still nearly empty) project — incremental `./mvnw -o compile` 1.3–2.5 s, `spring-boot:run` until `Started Application` 3.7 s. Not included: stopping the old process, waiting for/parsing the startup log, and lost UI state after a restart. In real applications with more beans, JPA etc., startup takes considerably longer, so the gap grows.
+"Without Dev Loop" was measured in a second run of the same steps with the Dev Loop removed: the app ran via `./mvnw spring-boot:run` with Spring Boot DevTools, and each change was made live with `./mvnw -o compile` (DevTools then restarts the app; CSS needs a browser reload). Times are from compile start until the change was live, read from log timestamps (≈1 s precision). Every restart drops the UI state. In real applications with more beans, JPA etc., startup takes considerably longer, so the gap grows.
 
-### Token usage per step
+### Token usage per step (with Dev Loop)
 
 | Step | Agent time | Turns | Output tokens | Input tokens | of which from cache | Cost (API list price) |
 |---|---|---|---|---|---|---|
@@ -121,5 +121,31 @@ Output from a run with Claude Code (Claude Opus 5.5, Vaadin 25.3.5, Spring Boot 
 | **Total** | **157.3 s** | **81** | **12,023** | **2,262,611** | **2,201,980** | **$1.17** |
 
 Input tokens count the full context again on every model call (turn); ~97 % of them are cache reads, which are billed at a fraction of the normal input price. Step 1 includes the initial context (system prompt, loading the Dev Loop skill, reading the project). Agent time is the agent's total wall time for the step (reading, editing, `apply`, browser check), not just the Dev Loop duration. Exit codes 0 are as reported by the agent; it could not print `$?` under its permission settings.
+
+### Token usage without Dev Loop
+
+Same steps, same model, headless per step, classic cycle (`mvn compile` + DevTools restart):
+
+| Step | Agent time | Turns | Output tokens | Input tokens | of which from cache | Cost (API list price) |
+|---|---|---|---|---|---|---|
+| 1. New view | 39.7 s | 13 | 3,100 | 426,375 | 387,898 | $0.45 |
+| 2. CSS color | 18.5 s | 7 | 1,132 | 267,726 | 265,337 | $0.10 |
+| 3. Text + placeholder | 19.9 s | 8 | 1,423 | 337,879 | 333,306 | $0.13 |
+| 4. Button field + notification | 27.2 s | 12 | 2,111 | 498,891 | 490,265 | $0.21 |
+| 5. `GreetingService` + injection | 34.1 s | 16 | 2,731 | 642,916 | 633,592 | $0.26 |
+| 6a. Compile error | 44.2 s | 12 | 3,426 | 814,720 | 804,872 | $0.31 |
+| 6b. Fix | 23.6 s | 8 | 1,609 | 536,339 | 530,786 | $0.18 |
+| **Total** | **207.2 s** | **76** | **15,532** | **3,524,846** | **3,446,056** | **$1.63** |
+
+| Total | With Dev Loop | Without Dev Loop | Difference |
+|---|---|---|---|
+| Agent time | 157.3 s | 207.2 s | +32 % |
+| Output tokens | 12,023 | 15,532 | +29 % |
+| Input tokens | 2,262,611 | 3,524,846 | +56 % |
+| Cost (API list price) | $1.17 | $1.63 | +40 % |
+
+Where the difference comes from: every turn re-sends the whole context, and without the Dev Loop the context grows faster (≈46k vs. ≈28k input tokens per turn on average) — the agent reads Maven output, application logs and timestamps to find out whether a restart has finished, instead of getting one verdict line from `apply`. The biggest gap is the error case (6a): the failed `mvn compile` deleted `Application.class`, DevTools restarted the app on the incomplete classes, and it ran for ~45 s without its app shell and styles — the agent spent extra turns investigating. With the Dev Loop, the app simply kept its last good bytes. Steps 1 and 2 were slightly cheaper without the Dev Loop (no skill to load, and the CSS change needed no restart); from step 3 on, the classic cycle costs more per step.
+
+These are single runs; agent runs vary noticeably from run to run, so treat the percentages as indicative, not exact.
 
 The Playwright page did not survive between the headless turns, so the CSS push (step 2) and the hotswap in step 3 were verified after a fresh page load; in step 4 the button appeared in the already-open page without a reload. Only adding a new Spring bean triggered a restart, which the daemon performed by itself.
