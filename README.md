@@ -95,14 +95,16 @@ if a restart was needed.
 
 Output from a run with Claude Code (Vaadin 25.3.5, Spring Boot 4.1.2):
 
-| Step | Path | Exit code | Duration | Reason for restart |
-|---|---|---|---|---|
-| 1. New view | Hotswap | 0 | 0.69 s | – (new route: page reload needed to show it) |
-| 2. CSS color | HMR | 0 | 0.07 s | – |
-| 3. Text + placeholder | Hotswap | 0 | 0.63 s | – |
-| 4. Button field + notification | Hotswap | 0 | 0.66 s | – |
-| 5. `GreetingService` + injection | Restart (automatic) | 0 | 5.19 s | New Spring bean — component scanning only runs at startup |
-| 6a. Compile error | Error | 1 | 0.08 s | – (`';' expected`; app keeps last good bytes) |
-| 6b. Fix | Hotswap | 0 | 0.64 s | – |
+| Step | Path | Exit code | Duration | Without Dev Loop (approx.) | Reason for restart |
+|---|---|---|---|---|---|
+| 1. New view | Hotswap | 0 | 0.69 s | ~5 s (compile + restart) | – (new route: page reload needed to show it) |
+| 2. CSS color | HMR | 0 | 0.07 s | ~1.5 s (copy resources + manual reload) | – |
+| 3. Text + placeholder | Hotswap | 0 | 0.63 s | ~5 s (compile + restart) | – |
+| 4. Button field + notification | Hotswap | 0 | 0.66 s | ~5 s (compile + restart) | – |
+| 5. `GreetingService` + injection | Restart (automatic) | 0 | 5.19 s | ~5 s (compile + restart) | New Spring bean — component scanning only runs at startup |
+| 6a. Compile error | Error | 1 | 0.08 s | ~1.5 s (failed `mvn compile`) | – (`';' expected`; app keeps last good bytes) |
+| 6b. Fix | Hotswap | 0 | 0.64 s | ~5 s (compile + restart) | – |
+
+"Without Dev Loop" assumes the classic cycle per edit: stop the app, `./mvnw compile`, `./mvnw spring-boot:run`, reload the browser. Basis: measured on the same machine with this (still nearly empty) project — incremental `./mvnw -o compile` 1.3–2.5 s, `spring-boot:run` until `Started Application` 3.7 s. Not included: stopping the old process, waiting for/parsing the startup log, and lost UI state after a restart. In real applications with more beans, JPA etc., startup takes considerably longer, so the gap grows.
 
 Steps 2–4 went live in the open page without a reload. Only adding a new Spring bean triggered a restart, which the daemon performed by itself.
